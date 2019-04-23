@@ -38,9 +38,8 @@ endif
 # VDSO linker flags.
 VDSO_LDFLAGS := \
 	-Wl,-Bsymbolic -Wl,--no-undefined -Wl,-soname=linux-vdso.so.1 \
-	-nostdlib -shared \
-	$(call cc-ldoption, -Wl$(comma)--hash-style=sysv) \
-	$(call cc-ldoption, -Wl$(comma)--build-id)
+	$(addprefix -Wl$(comma),$(filter -E%,$(KBUILD_CFLAGS))) \
+	-nostdlib -shared -Wl,--hash-style=sysv -Wl,--build-id
 
 GCOV_PROFILE := n
 
