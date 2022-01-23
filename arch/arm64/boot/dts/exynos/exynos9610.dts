@@ -154,7 +154,7 @@
 			compatible = "android,firmware";
 			vbmeta {
 				compatible = "android,vbmeta";
-				parts = "vbmeta,boot,recovery,system,vendor,product,dtb,dtbo,keystorage";
+				parts = "vbmeta,boot,recovery,system,vendor,dtb,dtbo,keystorage";
 			};
 			fstab {
 				compatible = "android,fstab";
@@ -173,13 +173,6 @@
 					mnt_flags = "ro";
 					fsmgr_flags = "wait,verify,avb";
 					status = "okay";
-				};
-				product {
-					compatible = "android,product";
-					dev = "/dev/block/platform/13520000.ufs/by-name/product";
-					type = "ext4";
-					mnt_flags = "ro";
-					fsmgr_flags = "wait,verify,avb";
 				};
 			};
 		};
