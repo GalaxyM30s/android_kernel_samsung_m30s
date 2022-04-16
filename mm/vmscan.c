@@ -2270,6 +2270,18 @@ static ssize_t disable_mem_boost_store(struct kobject *kobj,
 	return count;
 }
 
+ATOMIC_NOTIFIER_HEAD(am_app_launch_notifier);
+
+int am_app_launch_notifier_register(struct notifier_block *nb)
+{
+	return atomic_notifier_chain_register(&am_app_launch_notifier, nb);
+}
+
+int am_app_launch_notifier_unregister(struct notifier_block *nb)
+{
+	return  atomic_notifier_chain_unregister(&am_app_launch_notifier, nb);
+}
+
 #define MEM_BOOST_ATTR(_name) \
 	static struct kobj_attribute _name##_attr = \
 		__ATTR(_name, 0644, _name##_show, _name##_store)
