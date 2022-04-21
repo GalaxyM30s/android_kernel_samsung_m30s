@@ -23,6 +23,108 @@ struct mms_ts_info *tui_tsp_info;
 struct mms_ts_info *tsp_info;
 #endif
 
+int mms_set_power_state(struct mms_ts_info *info, u8 mode)
+{
+	u8 wbuf[3];
+	u8 rbuf[1];
+
+	input_dbg(false, &info->client->dev, "%s [START]\n", __func__);
+	input_dbg(false, &info->client->dev, "%s - mode[%u]\n", __func__, mode);
+
+	wbuf[0] = MIP_R0_CTRL;
+	wbuf[1] = MIP_R1_CTRL_POWER_STATE;
+	wbuf[2] = mode;
+
+	if (mms_i2c_write(info, wbuf, 3)) {
+		input_err(true, &info->client->dev, "%s [ERROR] mip4_ts_i2c_write\n", __func__);
+		return -EIO;
+	}
+
+	msleep(20);
+
+	if (mms_i2c_read(info, wbuf, 2, rbuf, 1)) {
+		input_err(true, &info->client->dev, "%s [ERROR] read %x %x, rbuf %x\n",
+				__func__, wbuf[0], wbuf[1], rbuf[0]);
+		return -EIO;
+	}
+
+	if (rbuf[0] != mode) {
+		input_err(true, &info->client->dev, "%s [ERROR] not changed to %s mode, rbuf %x\n",
+				__func__, mode ? "LPM" : "normal", rbuf[0]);
+		return -EIO;
+	}
+
+	input_dbg(false, &info->client->dev, "%s [DONE]\n", __func__);
+	return 0;
+}
+
+void mip4_ts_sponge_write_time(struct mms_ts_info *info, u32 val)
+{
+	int ret = 0;
+	u8 data[4];
+
+	input_info(true, &info->client->dev, "%s - time[%u]\n", __func__, val);
+
+	data[0] = (val >> 0) & 0xFF; /* Data */
+	data[1] = (val >> 8) & 0xFF; /* Data */
+	data[2] = (val >> 16) & 0xFF; /* Data */
+	data[3] = (val >> 24) & 0xFF; /* Data */
+
+	ret = mms_set_custom_library(info, SPONGE_UTC_OFFSET, data, 4);
+	if (ret < 0) {
+		input_err(true, &info->client->dev, "%s [ERROR] sponge_write\n", __func__);
+		return;
+	}
+}
+
+void mms_set_utc_sponge(struct mms_ts_info *info)
+{
+	struct timeval current_time;
+	u32 time_val = 0;
+
+	do_gettimeofday(&current_time);
+	time_val = (u32)current_time.tv_sec;
+	mip4_ts_sponge_write_time(info, time_val);
+}
+
+int mms_lowpower_mode(struct mms_ts_info *info, u8 on)
+{
+	int ret;
+	u8 wbuf[3];
+
+	if (!info->dtdata->support_lpm) {
+		input_err(true, &info->client->dev, "%s not supported\n", __func__);
+		return -EINVAL;
+	}
+
+	if (on == TO_LOWPOWER_MODE)
+		info->ic_status = LP_ENTER;
+
+	wbuf[0] = MIP_R0_CTRL;
+	wbuf[1] = MIP_R1_CTRL_PROX_OFF;
+	wbuf[2] = info->prox_power_off;
+
+	if (mms_i2c_write(info, wbuf, 3))
+		input_err(true, &info->client->dev, "%s [ERROR] mip4_ts_i2c_write\n", __func__);
+
+	ret = mms_set_power_state(info, on);
+	if (ret < 0)
+		input_err(true, &info->client->dev, "%s [ERROR] write power mode %s\n",
+				__func__, on ? "LP" : "NP");
+
+	if (on == TO_LOWPOWER_MODE) {
+		mms_set_custom_library(info, SPONGE_AOD_ENABLE_OFFSET, &(info->lowpower_flag), 1);
+		mms_set_utc_sponge(info);
+		info->ic_status = LP_MODE;
+	} else {
+		info->ic_status = PWR_ON;
+	}
+
+	input_info(true, &info->client->dev, "%s: %s mode flag %x  prox power %d\n", __func__,
+									on ? "LPM" : "normal", info->lowpower_flag, info->prox_power_off);
+	return 0;
+}
+
 /**
  * Reboot chip
  *
@@ -709,20 +811,30 @@ int mms_alert_handler_sponge(struct mms_ts_info *info, u8 *rbuf, u8 size)
 #define EXIT_WET_MODE		3
 static int mms_alert_handler_mode_state(struct mms_ts_info *info, u8 data)
 {
-	if (data == ENTER_NOISE_MODE) {
-		input_info(true, &info->client->dev, "%s: NOISE ON[%d]\n", __func__, data);
+	switch (data) {
+	case ENTER_NOISE_MODE:
+		input_info(true, &info->client->dev, 
+			   "%s: NOISE ON[%d]\n", __func__, data);
 		info->noise_mode = 1;
-	} else if (data == EXIT_NOISE_MODE) {
-		input_info(true, &info->client->dev, "%s: NOISE OFF[%d]\n", __func__, data);
+		break;
+	case EXIT_NOISE_MODE:
+		input_info(true, &info->client->dev,
+			   "%s: NOISE OFF[%d]\n", __func__, data);
 		info->noise_mode = 0;
-	} else if (data == ENTER_WET_MODE) {
-		input_info(true, &info->client->dev, "%s: WET MODE ON[%d]\n", __func__, data);
+		break;
+	case ENTER_WET_MODE:
+		input_info(true, &info->client->dev,
+			   "%s: WET MODE ON[%d]\n", __func__, data);
 		info->wet_mode = 1;
-	} else if (data == EXIT_WET_MODE) {
-		input_info(true, &info->client->dev, "%s: WET MODE OFF[%d]\n", __func__, data);
+		break;
+	case EXIT_WET_MODE:
+		input_info(true, &info->client->dev,
+			   "%s: WET MODE OFF[%d]\n", __func__, data);
 		info->wet_mode = 0;
-	} else {
-		input_info(true, &info->client->dev, "%s: MOT DEFINED[%d]\n", __func__, data);
+		break;
+	default:
+		input_info(true, &info->client->dev,
+			   "%s: NOT DEFINED[%d]\n", __func__, data);
 		return 1;
 	}
 
@@ -821,26 +933,34 @@ static irqreturn_t mms_interrupt(int irq, void *dev_id)
 		//Alert event
 		alert_type = rbuf[0];
 
-		input_dbg(true, &client->dev, "%s - alert type [%d]\n", __func__, alert_type);
+		input_dbg(true, &client->dev, "%s - alert type [%d]\n",
+			  __func__, alert_type);
 
-		if (alert_type == MIP_ALERT_ESD) {
-			//ESD detection
+		switch (alert_type) {
+		case MIP_ALERT_ESD:
+			/* ESD detection */
 			if (mms_alert_handler_esd(info, rbuf))
 				goto ERROR;
-		} else if (alert_type == MIP_ALERT_SPONGE_GESTURE) {
+			break;
+		case MIP_ALERT_SPONGE_GESTURE:
 			if (mms_alert_handler_sponge(info, rbuf, size))
 				goto ERROR;
-		} else if (alert_type == MIP_ALERT_SRAM_FAILURE) {
-			//SRAM failure
+			break;
+		case MIP_ALERT_SRAM_FAILURE:
+			/* SRAM failure */
 			if (mms_alert_handler_sram(info, &rbuf[1]))
 				goto ERROR;
-		} else if (alert_type == MIP_ALERT_MODE_STATE) {
+			break;
+		case MIP_ALERT_MODE_STATE:
 			if (mms_alert_handler_mode_state(info, rbuf[1]))
 				goto ERROR;
-		} else {
-			input_err(true, &client->dev, "%s [ERROR] Unknown alert type [%d]\n",
-				__func__, alert_type);
+			break;
+		default:
+			input_err(true, &client->dev,
+				  "%s [ERROR] Unknown alert type [%d]\n",
+				  __func__, alert_type);
 			goto ERROR;
+			break;
 		}
 	}
 
@@ -1195,39 +1315,6 @@ static void mms_run_rawdata(struct mms_ts_info *info, bool on_probe)
 		}
 	}
 
-	if (mms_run_test(info, MIP_TEST_TYPE_CM)) {
-		input_err(true, &info->client->dev, "%s cm error\n", __func__);
-		goto out;
-	}
-	minority_report_sync_latest_value(info);
-
-	if (mms_run_test(info, MIP_TEST_TYPE_CP)) {
-		input_err(true, &info->client->dev, "%s cp error\n", __func__);
-		goto out;
-	}
-
-	if (mms_run_test(info, MIP_TEST_TYPE_CP_SHORT)) {
-		input_err(true, &info->client->dev, "%s cp short error\n", __func__);
-		goto out;
-	}
-
-	if (mms_run_test(info, MIP_TEST_TYPE_CP_LPM)) {
-		input_err(true, &info->client->dev, "%s cp lpm error\n", __func__);
-		goto out;
-	}
-
-	if (on_probe) {
-		if (mms_run_test(info, MIP_TEST_TYPE_CM_ABS)) {
-			input_err(true, &info->client->dev, "%s cm abs error\n", __func__);
-			goto out;
-		}
-
-		if (mms_run_test(info, MIP_TEST_TYPE_CM_JITTER)) {
-			input_err(true, &info->client->dev, "%s cm_jitter error\n", __func__);
-			goto out;
-		}
-	}
-
 out:
 	mms_reboot(info);
 	input_raw_info(true, &info->client->dev, "%s: done ##\n", __func__);
@@ -1505,14 +1592,6 @@ static int mms_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	device_create(info->class, NULL, info->mms_dev, NULL, MMS_DEVICE_NAME);
 #endif
 
-#if MMS_USE_TEST_MODE
-	if (mms_sysfs_create(info)) {
-		input_err(true, &client->dev, "%s [ERROR] mms_sysfs_create\n", __func__);
-		ret = -EAGAIN;
-		goto err_test_sysfs_create;
-	}
-#endif
-
 #if MMS_USE_CMD_MODE
 	if (mms_sysfs_cmd_create(info)) {
 		input_err(true, &client->dev, "%s [ERROR] mms_sysfs_cmd_create\n", __func__);
@@ -1568,10 +1647,6 @@ err_create_attr_group:
 #if MMS_USE_CMD_MODE
 	mms_sysfs_cmd_remove(info);
 err_fac_cmd_create:
-#endif
-#if MMS_USE_TEST_MODE
-	mms_sysfs_remove(info);
-err_test_sysfs_create:
 #endif
 #if MMS_USE_DEV_MODE
 	device_destroy(info->class, info->mms_dev);
@@ -1631,10 +1706,6 @@ static int mms_remove(struct i2c_client *client)
 
 #if MMS_USE_CMD_MODE
 	mms_sysfs_cmd_remove(info);
-#endif
-
-#if MMS_USE_TEST_MODE
-	mms_sysfs_remove(info);
 #endif
 
 #if MMS_USE_DEV_MODE
@@ -1774,6 +1845,7 @@ static struct i2c_driver mms_driver = {
 #ifdef CONFIG_PM
 		.pm = &mms_dev_pm_ops,
 #endif
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 
