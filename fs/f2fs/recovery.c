@@ -287,6 +287,8 @@ static int recover_inode(struct inode *inode, struct page *page)
 
 	f2fs_mark_inode_dirty_sync(inode, true);
 
+	f2fs_mark_inode_dirty_sync(inode, true);
+
 	if (file_enc_name(inode))
 		name = "<encrypted>";
 	else
@@ -552,7 +554,7 @@ retry_dn:
 			"Inconsistent ofs_of_node, ino:%lu, ofs:%u, %u",
 			inode->i_ino, ofs_of_node(dn.node_page),
 			ofs_of_node(page));
-		err = -EFAULT;
+		err = -EFSCORRUPTED;
 		goto err;
 	}
 
