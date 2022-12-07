@@ -106,6 +106,7 @@ static void quota2_log(unsigned int hooknum,
 		return;
 	}
 	pm = nlmsg_data(nlh);
+	memset(pm, 0, sizeof(*pm));
 	if (skb->tstamp == 0)
 		__net_timestamp((struct sk_buff *)skb);
 	pm->data_len = 0;
@@ -162,6 +163,8 @@ static ssize_t quota_proc_write(struct file *file, const char __user *input,
 	if (copy_from_user(buf, input, size) != 0)
 		return -EFAULT;
 	buf[sizeof(buf)-1] = '\0';
+	if (size < sizeof(buf))
+		buf[size] = '\0';
 
 	spin_lock_bh(&e->lock);
 	e->quota = simple_strtoull(buf, NULL, 0);
@@ -349,6 +352,7 @@ static struct xt_match quota_mt2_reg[] __read_mostly = {
 		.match      = quota_mt2,
 		.destroy    = quota_mt2_destroy,
 		.matchsize  = sizeof(struct xt_quota_mtinfo2),
+		.usersize   = offsetof(struct xt_quota_mtinfo2, master),
 		.me         = THIS_MODULE,
 	},
 	{
@@ -359,6 +363,7 @@ static struct xt_match quota_mt2_reg[] __read_mostly = {
 		.match      = quota_mt2,
 		.destroy    = quota_mt2_destroy,
 		.matchsize  = sizeof(struct xt_quota_mtinfo2),
+		.usersize   = offsetof(struct xt_quota_mtinfo2, master),
 		.me         = THIS_MODULE,
 	},
 };

@@ -3394,6 +3394,10 @@ static int decon_fb_alloc_memory(struct decon_device *decon, struct decon_win *w
 	}
 
 	vaddr = dma_buf_vmap(buf);
+	if (IS_ERR_OR_NULL(vaddr)) {
+		dev_err(decon->dev, "dma_buf_vmap() failed\n");
+		goto err_map;
+	}
 #endif
 
 	memset(vaddr, 0x00, size);
